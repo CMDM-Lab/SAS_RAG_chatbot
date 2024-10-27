@@ -1,0 +1,5 @@
+.SAS_txt_file
+.vectorstore
+vector_db
+rag_datasource
+.env
