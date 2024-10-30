@@ -3,3 +3,6 @@
 vector_db
 rag_datasource
 .env
+__pycache__
+sas_rag_chatbot.log
+__pycache__/*

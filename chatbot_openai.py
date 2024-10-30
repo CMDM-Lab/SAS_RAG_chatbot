@@ -3,8 +3,8 @@ import os
 import subprocess
 import streamlit as st
 import retriever_chain_openai as rc
-from langchain.vectorstores import Chroma
-# from langchain_community.vectorstores import Chroma
+#from langchain.vectorstores import Chroma
+from langchain_community.vectorstores import Chroma
 import vectorstore as vs
 from retriever_chain_openai import format_docs
 import requests
@@ -46,16 +46,16 @@ def main():
 
     # 根據用戶輸入的化學品號碼獲取對應的名稱
     #chemical_name = get_chemical_name(SAS_chemical_number)
-    chemical_name = get_api_response(f"http://172.16.146.197:13003/api/chemicals/name/{chemical_id}")
+    chemical_name = get_api_response(f"https://sas.cmdm.tw/api/chemicals/name/{chemical_id}")
 
-    st.title('🧪 SAS GPT')
+    st.title('🧪 SAS GPT 對談機器人 - 測試版')
     st.caption("🦙 A SAS GPT powered by ChatGPT-4o & NeMo-Guardrails") #更改使用模型名稱
-    st.warning('🤖 Chatbot with 🧪  '  + f"{chemical_name}")
+    st.warning('🤖 請詢問有關 🧪  '  + f"{chemical_name}的相關問題，目前對談機器人基於SAS系統整理的危害資訊以及安全替代物回答問題，但仍建議您再次確認。您可嘗試提問：「{chemical_name}有什麼危害資訊」、「{chemical_name}有什麼安全替代物」")
 
     with st.sidebar:
         # 清除聊天歷史按鈕
         st.button('🧹 清除查詢記錄', on_click=lambda: st.session_state.update(messages=[{"role": "assistant", "content": "請提問化學物質相關問題"}]))
-        st.markdown("[🔙 回到SAS平台](https://sas.cmdm.tw)")
+        st.markdown(f"[🔙 回到SAS平台](https://sas.cmdm.tw/chemicals/{chemical_id})")
 
     # 初始化會話狀態中的消息列表，如果還沒有則創建一個默認的消息
     if "messages" not in st.session_state:
@@ -69,9 +69,11 @@ def main():
         # 將用戶消息添加到會話狀態中
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.chat_message("user").write(prompt)
-
         # 構建一個查詢，只包含目前使用者輸入的問題
         query = prompt  # 只使用最新的使用者輸入作為查詢
+        #20241030.cot: add some tips
+        query = f"關於{chemical_name}，" + prompt
+        logger.info(f"提問：{query}")
 
         with st.spinner("思考中，請稍候..."):
             response, error = get_response(query, chemical_id)
@@ -79,6 +81,7 @@ def main():
             if error:
                 st.error(f"Error: {error}")
             else:
+                logger.info(f"回覆：{response}")
                 # 將模型生成的回應添加到會話狀態中並顯示
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 st.chat_message("assistant").write(response)
@@ -100,11 +103,12 @@ def get_response(query, chemical_id):
                 f'./vector_db/chemicals/{chemical_id}/summary'
             ]
             #20241023.cot: build the vector db if vector db doesn't exist
-            print('check and create vector db')
+            #print('check and create vector db')
             check_and_create_vector_db(load_path, chemical_id)
             #20241023.cot: include alternative vector db
-            industrial_use_ids = get_api_response(f"http://172.16.146.197:13003/api/chemicals/industrial_use_ids/{chemical_id}")
+            industrial_use_ids = get_api_response(f"https://sas.cmdm.tw/api/chemicals/industrial_use_ids/{chemical_id}")
             alternatives_path = [f"./vector_db/alternatives_by_industrial_use/{use_id}" for use_id in industrial_use_ids]
+            logger.info(alternatives_path)
             check_and_create_vector_db_for_alternatives(alternatives_path)
             load_path.extend(alternatives_path)
 
@@ -132,9 +136,9 @@ def clear_chat_history():
 def generate_rag_datasource(datatype, chemical_id, output_name):
     if datatype == "chemicals":
         if output_name == "hazard_wo_duplicate":
-            url = f"http://172.16.146.197:13003/chemical/{chemical_id}/report.csv"
+            url = f"https://sas.cmdm.tw/chemical/{chemical_id}/report.csv"
             file_path = f"./rag_datasource/{datatype}/{chemical_id}/hazard_wo_duplicate"
-            get_api_csv_response(url, chemical_id, file_path)
+            get_api_csv_response(url, file_path)
 
         elif output_name == "summary":
             #20241024.cot: generate summary with ligi2009's python script
@@ -147,9 +151,9 @@ def generate_rag_datasource(datatype, chemical_id, output_name):
             print("Command executed successfully:", result.stdout)
 
     elif datatype == "alternatives_by_industrial_use":
-        url = f"http://172.16.146.197:13003/alternatives_industrial_use/csv/{output_name}/"
+        url = f"https://sas.cmdm.tw/alternatives_industrial_use/csv/{output_name}/"
         file_path = f"./rag_datasource/{datatype}/{output_name}"
-        get_api_csv_response(url, '', file_path)
+        get_api_csv_response(url, file_path)
 
     else:
         print("unknown dataype")
@@ -192,16 +196,17 @@ def check_and_create_vector_db_for_alternatives(paths):
     """
     for path in paths:
         if not os.path.exists(path):
-            print(f"Path does not exist: {path}")
+            logger.info(f"Path does not exist: {path}")
             output_name = os.path.basename(path)
             input_rag = f'./rag_datasource/alternatives_by_industrial_use/{output_name}'
+            logger.info("input_rag" + input_rag)
             #20241024.cot: create input by calling API
             if not os.path.exists(input_rag):
-                generate_rag_datasource("alternatives_by_industrial_use", '', {output_name})
+                generate_rag_datasource("alternatives_by_industrial_use", '', output_name)
 
             try:
                 # Construct the command to execute the Python script with the specified arguments
-                command = ['python', 'vectorstore_alternative.py', path, '1000', '200', output_name]
+                command = ['python', 'vectorstore_alternative.py', input_rag, '1000', '200', output_name]
                 print(f"Executing command: {' '.join(command)}")
                 # Use subprocess to execute the command
                 result = subprocess.run(command, check=True, capture_output=True, text=True)
@@ -217,6 +222,7 @@ def get_api_response(url):
         response = requests.get(url)
         # Get the content type from the headers
         content_type = response.headers.get('Content-Type')
+        logger.info(f"Content-Type: {content_type}")
 
         # Check if the response is JSON
         if 'application/json' in content_type:
@@ -225,9 +231,8 @@ def get_api_response(url):
         elif 'text/plain' in content_type:
             data = response.text  # Get plain text response
         else:
-            print(f"Unhandled Content-Type: {content_type}")
-            print(response.text)
-            logging.info(f"Unhandled Content-Type: {content_type}")
+            logger.debug(f"Unhandled Content-Type: {content_type}")
+            logger.debug(response.text)
             # Handle other types as per your requirements, e.g., XML, HTML, etc.
 
         #return data, None
@@ -235,9 +240,9 @@ def get_api_response(url):
 
     except requests.exceptions.RequestException as e:
         # Handle any network-related errors
-        print(f"An error occurred: {e}")
+        logger.debug(f"An error occurred: {e}")
 
-def get_api_csv_response(url, chemical_id, file_path):
+def get_api_csv_response(url, file_path):
     try:
         path = Path(file_path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -258,5 +263,27 @@ def get_api_csv_response(url, chemical_id, file_path):
         # Handle any network-related errors or exceptions
         print(f"An error occurred: {e}")
 
+#https://stackoverflow.com/questions/75410059/how-to-log-user-activity-in-a-streamlit-app
+def init_logging():
+    # Make sure to instanciate the logger only once
+    # otherwise, it will create a StreamHandler at every run
+    # and duplicate the messages
+
+    # create a custom logger
+    logger = logging.getLogger("SAS_RAG_chatbot_openai")
+    if logger.handlers:  # logger is already setup, don't setup again
+        return
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    # in the formatter, use the variable "user_ip"
+    formatter = logging.Formatter("%(name)s %(asctime)s %(levelname)s - %(message)s")
+    #handler = logging.StreamHandler()
+    handler = logging.FileHandler('sas_rag_chatbot.log')
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
 if __name__ == "__main__":
+    init_logging()
+    logger = logging.getLogger("SAS_RAG_chatbot_openai")
     main()

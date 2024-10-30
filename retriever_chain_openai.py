@@ -22,7 +22,7 @@ def format_docs(docs):
     return "\n\n".join([d.page_content for d in docs])
 
 # 建立RAG Chain 選擇llm model, embedding model, vector database
-def chain(llm_model='gpt-4o-mini', load_path=None):
+def chain(llm_model='gpt-4o', load_path=None):
     # llm = ChatOpenAI(model=llm_model, top_p=0.75, temperature=0.4)
     llm = ChatOpenAI(model=llm_model, temperature=0.4)
     # llm = ChatOllama(model=llm_model, temperature=0.3)
